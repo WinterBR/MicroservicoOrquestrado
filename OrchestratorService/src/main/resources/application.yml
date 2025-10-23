@@ -1,0 +1,22 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  cloud:
+    config:
+      enabled: false
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKER:kafka:29092}
+    topic:
+      start-saga: ${TOPIC_START_SAGA:start-saga}
+      orchestrator: ${TOPIC_ORCHESTRATOR:orchestrator}
+      finish-success: ${TOPIC_FINISH_SUCCESS:finish-success}
+      finish-fail: ${TOPIC_FINISH_FAIL:finish-fail}
+    consumer:
+      group-id: ${CONSUMER_GROUP:orchestrator-group}
+      auto-offset-reset: latest
+
+logging:
+  level:
+    org.apache.kafka: OFF

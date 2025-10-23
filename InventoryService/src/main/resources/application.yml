@@ -1,0 +1,31 @@
+server:
+  port: ${SERVER_PORT:8092}
+
+spring:
+  cloud:
+    config:
+      enabled: false
+  datasource:
+    url: ${DB_URL:jdbc:oracle:thin:@${DB_HOST:inventory-db}:${DB_PORT:1521}/${DB_NAME:XEPDB1}}
+    username: ${DB_USER:inventory_user}
+    password: ${DB_PASSWORD:Oracle123}
+    driver-class-name: oracle.jdbc.OracleDriver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    database-platform: org.hibernate.dialect.OracleDialect
+    show-sql: true
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKER:kafka:29092}
+    topic:
+      inventory-success: ${TOPIC_INVENTORY_SUCCESS:inventory-success}
+      inventory-fail: ${TOPIC_INVENTORY_FAIL:inventory-fail}
+      orchestrator: ${TOPIC_ORCHESTRATOR:orchestrator}
+    consumer:
+      group-id: ${CONSUMER_GROUP:inventory-group}
+      auto-offset-reset: latest
+
+logging:
+  level:
+    org.apache.kafka: OFF

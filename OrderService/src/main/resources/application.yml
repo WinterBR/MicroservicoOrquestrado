@@ -1,0 +1,24 @@
+server:
+  port: ${SERVER_PORT:3000}
+
+spring:
+  cloud:
+    config:
+      enabled: false
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://admin:123456@order-db:27017/order-db?authSource=admin}
+      database: ${MONGO_DATABASE:order-db}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKER:kafka:29092}
+    topic:
+      start-saga: ${TOPIC_START_SAGA:start-saga}
+      notify-ending: ${TOPIC_NOTIFY_ENDING:notify-ending}
+    consumer:
+      group-id: ${CONSUMER_GROUP:order-group}
+      auto-offset-reset: latest
+
+logging:
+  level:
+    org.apache.kafka: OFF

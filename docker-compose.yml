@@ -1,0 +1,324 @@
+version: '3.9'
+
+services:
+  # MongoDB (Order)
+  order-db:
+    image: mongo:7.0
+    container_name: order-db
+    restart: always
+    networks:
+      - orchestrator-saga
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: 123456
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # PostgreSQL (Product)
+  product-db:
+    image: postgres:16
+    container_name: product-db
+    restart: always
+    networks:
+      - orchestrator-saga
+    environment:
+      POSTGRES_DB: product-db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d product-db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # MySQL (Payment)
+  payment-db:
+    image: mysql:8.0
+    container_name: payment-db
+    restart: always
+    networks:
+      - orchestrator-saga
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql
+      MYSQL_DATABASE: payment-db
+      MYSQL_USER: mysql
+      MYSQL_PASSWORD: mysql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "mysql", "-p$$MYSQL_PASSWORD"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --skip-host-cache
+      - --skip-name-resolve
+
+  # Oracle XE (Inventory)
+  inventory-db:
+    image: gvenzl/oracle-xe:21-slim
+    container_name: inventory-db
+    restart: always
+    environment:
+      ORACLE_PASSWORD: "Oracle123"
+      APP_USER: "inventory_user"
+      APP_USER_PASSWORD: "Oracle123"
+    ports:
+      - "1521:1521"
+    networks:
+      - orchestrator-saga
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "echo 'SELECT 1 FROM DUAL;' | sqlplus -s inventory_user/Oracle123@//localhost:1521/XEPDB1" ]
+      interval: 20s
+      timeout: 15s
+      retries: 10
+      start_period: 60s
+
+  # Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: zookeeper
+    restart: always
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - orchestrator-saga
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo stat | nc localhost 2181"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+
+  # Kafka (Confluent)
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka
+    restart: always
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    networks:
+      - orchestrator-saga
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:29092", "--list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Redpanda Console
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:v2.5.2
+    container_name: kafka-console
+    restart: on-failure
+    networks:
+      - orchestrator-saga
+    ports:
+      - "8081:8080"
+    environment:
+      KAFKA_BROKERS: "kafka:29092"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/status"]
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ======================
+  # 🚀 MICROSERVIÇOS JAVA
+  # ======================
+
+  # Order Service
+  order-service:
+    build: ./orderService
+    container_name: order-service
+    depends_on:
+      order-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - orchestrator-saga
+    ports:
+      - "3000:3000"
+    environment:
+      SPRING_PROFILES_ACTIVE: "default"
+      SERVER_PORT: 3000
+      MONGO_URI: mongodb://admin:123456@order-db:27017/order-db?authSource=admin
+      MONGO_DATABASE: order-db
+      KAFKA_BROKER: kafka:29092
+      TOPIC_START_SAGA: start-saga
+      TOPIC_NOTIFY_ENDING: notify-ending
+      CONSUMER_GROUP: order-group
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/actuator/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Orchestrator Service
+  orchestrator-service:
+    build: ./OrchestratorService
+    container_name: orchestrator-service
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - orchestrator-saga
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: "default"
+      SERVER_PORT: 8080
+      KAFKA_BROKER: kafka:29092
+      TOPIC_START_SAGA: start-saga
+      TOPIC_ORCHESTRATOR: orchestrator
+      TOPIC_FINISH_SUCCESS: finish-success
+      TOPIC_FINISH_FAIL: finish-fail
+      CONSUMER_GROUP: orchestrator-group
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Product Validation Service
+  product-validation-service:
+    build: ./ProductValidationService
+    container_name: product-validation-service
+    depends_on:
+      product-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - orchestrator-saga
+    ports:
+      - "8090:8090"
+    environment:
+      SPRING_PROFILES_ACTIVE: "default"
+      SERVER_PORT: 8090
+      DB_HOST: product-db
+      DB_PORT: 5432
+      DB_NAME: product-db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      KAFKA_BROKER: kafka:29092
+      TOPIC_ORCHESTRATOR: orchestrator
+      TOPIC_PRODUCT_VALIDATION_SUCCESS: product-validation-success
+      TOPIC_PRODUCT_VALIDATION_FAIL: product-validation-fail
+      CONSUMER_GROUP: product-validation-group
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/actuator/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Payment Service
+  payment-service:
+    build: ./PaymentService
+    container_name: payment-service
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - orchestrator-saga
+    ports:
+      - "8091:8091"
+    environment:
+      SPRING_PROFILES_ACTIVE: "default"
+      SERVER_PORT: 8091
+      DB_HOST: payment-db
+      DB_PORT: 3306
+      DB_NAME: payment-db
+      DB_USER: mysql
+      DB_PASSWORD: mysql
+      KAFKA_BROKER: kafka:29092
+      TOPIC_PAYMENT_SUCCESS: payment-success
+      TOPIC_PAYMENT_FAIL: payment-fail
+      TOPIC_ORCHESTRATOR: orchestrator
+      TOPIC_PAYMENT_PROCESSING: payment-processing-topic
+      TOPIC_PAYMENT_PROCESSED: payment-processed-topic
+      TOPIC_PAYMENT_FAILED: payment-failed-topic
+      CONSUMER_GROUP: payment-group
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/actuator/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Inventory Service
+  inventory-service:
+    build: ./InventoryService
+    container_name: inventory-service
+    depends_on:
+      inventory-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - orchestrator-saga
+    ports:
+      - "8092:8092"
+    environment:
+      SPRING_PROFILES_ACTIVE: "default"
+      SERVER_PORT: 8092
+      DB_HOST: inventory-db
+      DB_PORT: 1521
+      DB_NAME: XEPDB1
+      DB_USER: inventory_user
+      DB_PASSWORD: Oracle123
+      KAFKA_BROKER: kafka:29092
+      TOPIC_ORCHESTRATOR: orchestrator
+      TOPIC_INVENTORY_SUCCESS: inventory-success
+      TOPIC_INVENTORY_FAIL: inventory-fail
+      CONSUMER_GROUP: inventory-group
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8092/actuator/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+networks:
+  orchestrator-saga:
+    driver: bridge
+
+volumes:
+  sql_data:
+  oracle_data:

@@ -1,0 +1,38 @@
+server:
+  port: ${SERVER_PORT:8091}
+
+spring:
+  cloud:
+    config:
+      enabled: false
+  datasource:
+    url: ${DB_URL:jdbc:mysql://${DB_HOST:payment-db}:${DB_PORT:3306}/${DB_NAME:payment-db}}
+    username: ${DB_USER:mysql}
+    password: ${DB_PASSWORD:mysql}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    database-platform: org.hibernate.dialect.MySQL8Dialect
+    show-sql: true
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKER:kafka:29092}
+    topic:
+      payment-success: ${TOPIC_PAYMENT_SUCCESS:payment-success}
+      payment-fail: ${TOPIC_PAYMENT_FAIL:payment-fail}
+      orchestrator: ${TOPIC_ORCHESTRATOR:orchestrator}
+    consumer:
+      group-id: ${CONSUMER_GROUP:payment-group}
+      auto-offset-reset: latest
+
+logging:
+  level:
+    org.apache.kafka: OFF
+
+app:
+  kafka:
+    topics:
+      payment-processing: ${TOPIC_PAYMENT_PROCESSING:payment-processing-topic}
+      payment-processed: ${TOPIC_PAYMENT_PROCESSED:payment-processed-topic}
+      payment-failed: ${TOPIC_PAYMENT_FAILED:payment-failed-topic}
