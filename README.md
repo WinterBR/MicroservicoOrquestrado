@@ -1,1 +1,1 @@
-![Captura do Microserviço Orquestrado](Captura%20de%20Tela%20(594).png)
+![Captura do Microserviço Orquestrado](ImagemProjeto.png)
